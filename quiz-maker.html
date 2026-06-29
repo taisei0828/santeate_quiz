@@ -602,13 +602,15 @@ importDrop.addEventListener('drop',e=>{e.preventDefault();importDrop.classList.r
 function importCSV(file){
   const reader=new FileReader();
   reader.onload=e=>{
-    const lines=e.target.result.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(l=>l.trim());
-    if(lines.length<2){showAlert('danger','データが見つかりません');return}
-    const headers=parseCSVLine(lines[0]).map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase());
+    const text=e.target.result.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+    const rows=parseCSV(text);
+    if(rows.length<2){showAlert('danger','データが見つかりません');return}
+    const headers=rows[0].map(h=>h.trim().toLowerCase());
     const imported=[];let skipped=0;
-    for(let i=1;i<lines.length;i++){
-      const vals=parseCSVLine(lines[i]);
-      const row={};headers.forEach((h,j)=>row[h]=(vals[j]||'').trim().replace(/^"|"$/g,''));
+    for(let i=1;i<rows.length;i++){
+      const vals=rows[i];
+      if(vals.length===1&&vals[0].trim()==='')continue; // 空行スキップ
+      const row={};headers.forEach((h,j)=>row[h]=(vals[j]||'').trim());
       if(!row.type||!row.question)continue;
       const basis=row.basis||'';
       if(basis.length>BASIS_LIMIT){skipped++;continue}
@@ -629,15 +631,27 @@ function importCSV(file){
   };
   reader.readAsText(file,'UTF-8');
 }
-function parseCSVLine(line){
-  const result=[];let cur='';let inQ=false;
-  for(let i=0;i<line.length;i++){
-    const ch=line[i];
-    if(ch==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++}else inQ=!inQ}
-    else if(ch===','&&!inQ){result.push(cur);cur=''}
-    else cur+=ch;
+// RFC 4180準拠：クォート内の改行・カンマ・ダブルクォートを正しく処理
+function parseCSV(text){
+  const rows=[];let cur=[];let field='';let inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){
+      if(ch==='"'){
+        if(text[i+1]==='"'){field+='"';i++} // エスケープされた"
+        else inQ=false; // クォート終了
+      } else {
+        field+=ch; // クォート内は改行含め全てフィールドの一部
+      }
+    } else {
+      if(ch==='"'){inQ=true}
+      else if(ch===','){cur.push(field);field=''}
+      else if(ch==='\n'){cur.push(field);rows.push(cur);cur=[];field=''}
+      else{field+=ch}
+    }
   }
-  result.push(cur);return result;
+  if(field||cur.length){cur.push(field);rows.push(cur)} // 末尾の行
+  return rows;
 }
 function toCSVField(v){
   if(v===null||v===undefined)return'';
